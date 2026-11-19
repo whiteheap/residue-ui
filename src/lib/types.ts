@@ -418,7 +418,7 @@ export interface RestoreDocument {
   restored: string | null;
   /** After a restore: how it came back. */
   restore: {
-    kind: "trash" | "removed";
+    kind: "trash" | "removed" | "agent_files";
     entry: string;
     path: string;
     branch: string | null;
@@ -432,7 +432,19 @@ export interface RestoreDocument {
   } | null;
   trash: TrashItem[];
   removed: RemovalRecord[];
+  /** Codex session logs residue moved. Absent from a residue older than 0.0.16. */
+  agent_files?: AgentTrashEntry[];
   errors: string[];
+}
+
+export interface AgentTrashEntry {
+  kind: "agent_files";
+  entry: string;
+  entry_path: string;
+  id: string;
+  trashed_at: string | null;
+  files: { path: string; thread_id: string; bytes: number }[];
+  error: string | null;
 }
 
 /** `residue restore --json`, run in one scan folder. */
@@ -446,7 +458,7 @@ export interface Listing {
 
 /** A Restore row as the window shows it, which its click sends back. */
 export interface ShownEntry {
-  kind: "trash" | "removed";
+  kind: "trash" | "removed" | "agent_files";
   /** The listing's `id`, passed as `--expect`. */
   id: string;
   entry: string;
@@ -487,6 +499,7 @@ export type Restorable = {
   id: string | null;
 } & (
   | { kind: "trash"; bytes: number | null; registered: boolean }
+  | { kind: "agent_files"; files: number }
   | {
       kind: "removed";
       state: RemovalRecord["state"];

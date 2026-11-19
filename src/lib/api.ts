@@ -20,6 +20,7 @@ import type {
   AgentsDocument,
   StatsDocument,
 } from "./types";
+import type { PruneDocument } from "./prune";
 
 /** Every rejection from a command is a CliError; anything else is wrapped. */
 export function asCliError(e: unknown): CliError {
@@ -100,4 +101,13 @@ export const api = {
   stats: () => call<StatsDocument>("stats"),
   /** `residue agents --json` on the folders the app already scans. Exit 2: this residue has no such command. */
   agentsReport: (roots: string[]) => call<AgentsDocument>("agents_report", { roots }),
+  /** `residue agents prune --older-than Nd --json`. Moves nothing. */
+  planAgentPrune: (days: number) => call<PruneDocument>("plan_agent_prune", { days }),
+  /** Confirms that plan: `--yes --as-of generated_at --expect plan`. */
+  confirmAgentPrune: (shown: { days: number; as_of: string; plan: string }) =>
+    call<{ outcome: "ran"; document: PruneDocument; exit_code: number | null } | { outcome: "stale"; document: PruneDocument }>(
+      "confirm_agent_prune",
+      { shown },
+    ),
+  pruneRunning: () => call<boolean>("prune_running"),
 };

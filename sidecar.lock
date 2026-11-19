@@ -12,9 +12,9 @@
 #   archive's sha256 and attestation check out;
 # - read the release's CHANGELOG entry, and update what the app says about
 #   residue's behavior in the same pull request (AGENTS.md, "Invariants").
-version=0.0.15
+version=0.0.16
 attested_as=whiteheap/residue-cli
-sha256_aarch64-apple-darwin=9fbae8b33703d69b0583843743ae863859dc41d1265e655edeb87238d6c5f9f3
-sha256_x86_64-apple-darwin=a8d68fd8775da8ce4e352a0611dc950608a2c4a2b477d4b0d310febfdc61ebd5
-binary_sha256_aarch64-apple-darwin=22742584eb713aaef9eebd58b704dde8362662aaef881d9a0792562ba8253d7f
-binary_sha256_x86_64-apple-darwin=45fbccbe6b374adbb961d587d9ff887fbece85484b67b824e3d49af0ef0a88b8
+sha256_aarch64-apple-darwin=ab2249349e24396d5a98ed2f6ba3043afc8caec9060527c58421f59c89fed46c
+sha256_x86_64-apple-darwin=89aeb602bed629fd9c4898ece168d6d88ad5026acef85b35ca1b30a1668839b0
+binary_sha256_aarch64-apple-darwin=ae584afde7493c5e7e0ea5c4780c265127399ef74d75ee8fb4471baac21074ed
+binary_sha256_x86_64-apple-darwin=594a75902bf0cf941443ea9d47145015ea2fc824a2e3f49b9f1c6a505233a005

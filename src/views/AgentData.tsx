@@ -1,11 +1,13 @@
 import { Button } from "@cloudflare/kumo";
 import { ArrowClockwise, HardDrives } from "@phosphor-icons/react";
+import { useEffect, useState } from "react";
 import { noAgentData, storeLines, wholeStore } from "../lib/agents";
 import { api } from "../lib/api";
 import { bytes, tilde } from "../lib/format";
 import type { AgentStore } from "../lib/types";
 import { useCli } from "../lib/useCli";
 import { ErrorPanel, Loading, PageHeader } from "../components/ui";
+import { PruneDialog } from "./PruneDialog";
 
 /**
  * What Codex and Claude Code keep on disk (`residue agents --json`). The
@@ -25,6 +27,19 @@ export function AgentData({
 }) {
   const key = `${refreshKey}:${JSON.stringify(roots)}`;
   const q = useCli(key, () => api.agentsReport(roots));
+  const [pruneOpen, setPruneOpen] = useState(false);
+  const [pruneBusy, setPruneBusy] = useState(false);
+  useEffect(() => {
+    let live = true;
+    api.pruneRunning().then((running) => {
+      if (live) setPruneBusy(running);
+    }).catch(() => {
+      if (live) setPruneBusy(false);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
   const doc = q.data;
   const error = q.error;
   const unavailable = error?.kind === "invalid";
@@ -79,6 +94,15 @@ export function AgentData({
                   {storeLines(agent).map((store) => (
                     <li key={store.store}>
                       <StoreLine store={store} home={home} />
+                      {agent.agent === "codex" && store.store === "sessions" ? (
+                        <Button
+                          variant="secondary"
+                          disabled={pruneBusy}
+                          onClick={() => setPruneOpen(true)}
+                        >
+                          Move sessions older than 30, 60 or 90 days to the trash
+                        </Button>
+                      ) : null}
                     </li>
                   ))}
                 </ul>
@@ -102,6 +126,15 @@ export function AgentData({
           <p className="hint">Could not inspect: {doc.errors.join(" ")}</p>
         ) : null}
       </div>
+      {pruneOpen ? (
+        <PruneDialog
+          onClose={() => {
+            setPruneOpen(false);
+            api.pruneRunning().then(setPruneBusy).catch(() => setPruneBusy(false));
+            q.reload();
+          }}
+        />
+      ) : null}
     </>
   );
 }

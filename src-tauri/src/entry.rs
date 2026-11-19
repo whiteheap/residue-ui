@@ -45,6 +45,8 @@ struct Listed {
     restore: Option<Done>,
     trash: Vec<Item>,
     removed: Vec<Item>,
+    #[serde(default)]
+    agent_files: Vec<Item>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -77,6 +79,7 @@ pub fn folders(listing: &str) -> Result<BTreeMap<String, String>, String> {
         .trash
         .iter()
         .chain(&listed.removed)
+        .chain(&listed.agent_files)
         .filter_map(|i| Some((i.entry_path.clone(), folder::id(Path::new(&i.entry_path))?)))
         .collect())
 }
@@ -124,16 +127,17 @@ pub fn unlike(shown: &Shown, answer: &str, home: &Path) -> Vec<String> {
     line("Entry", Some(&shown.entry), Some(&done.entry));
     let item = match done.kind.as_str() {
         "trash" => answer.trash.first(),
+        "agent_files" => answer.agent_files.first(),
         _ => answer.removed.first(),
     };
     let Some(item) = item else {
         out.push("residue's answer names no entry".into());
         return out;
     };
-    let at = if done.kind == "trash" {
-        &item.trashed_at
-    } else {
+    let at = if done.kind == "removed" {
         &item.removed_at
+    } else {
+        &item.trashed_at
     };
     line("Entry", Some(&shown.entry), Some(&item.entry));
     line(
@@ -149,10 +153,10 @@ pub fn unlike(shown: &Shown, answer: &str, home: &Path) -> Vec<String> {
     line("Branch", shown.branch.as_deref(), item.branch.as_deref());
     line("HEAD", shown.head.as_deref(), item.head.as_deref());
     line(
-        if done.kind == "trash" {
-            "Trashed"
-        } else {
+        if done.kind == "removed" {
             "Removed"
+        } else {
+            "Trashed"
         },
         shown.at.as_deref(),
         at.as_deref(),

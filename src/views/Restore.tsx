@@ -36,6 +36,24 @@ function restorables(listings: Listing[]): Restorable[] {
         registered: t.registered,
       });
     }
+    for (const a of l.document?.agent_files ?? []) {
+      if (seen.has(a.entry_path)) continue;
+      seen.add(a.entry_path);
+      out.push({
+        kind: "agent_files",
+        root: l.root,
+        name: a.entry,
+        entryPath: a.entry_path,
+        originalPath: a.files[0]?.path ?? null,
+        branch: null,
+        head: null,
+        at: a.trashed_at,
+        error: a.error,
+        folder: l.folders[a.entry_path] ?? null,
+        id: a.id,
+        files: a.files.length,
+      });
+    }
     for (const r of l.document?.removed ?? []) {
       if (seen.has(r.entry_path)) continue;
       seen.add(r.entry_path);
@@ -373,7 +391,10 @@ export function Restore({
                 // a state a newer residue adds.
                 const restorable =
                   item.kind === "trash" ||
-                  (!item.error && (item.state === "removed" || item.state === "interrupted" || item.state === "back"));
+                  item.kind === "agent_files" ||
+                  (item.kind === "removed" &&
+                    !item.error &&
+                    (item.state === "removed" || item.state === "interrupted" || item.state === "back"));
                 const kept = item.kind === "trash" && !item.error ? trashAge(item.at, now, keepSeconds) : null;
                 const held = item.kind === "removed" ? recordKeep(item, now) : null;
                 return (
@@ -388,6 +409,8 @@ export function Restore({
                           ? item.error
                           : item.kind === "trash"
                             ? `moved to the trash ${ageOf(item.at, now) ?? ""}${item.registered ? "" : ", no longer registered with Git"}`
+                            : item.kind === "agent_files"
+                              ? `Codex session logs, ${item.files} files, moved to the trash ${ageOf(item.at, now) ?? ""}`
                             : [
                                 "removed",
                                 ageOf(item.at, now),
@@ -453,7 +476,11 @@ export function Restore({
                           disabled={working !== null}
                           onClick={() => restore(item)}
                           aria-label={
-                            item.kind === "trash" ? `Restore ${name} from the trash` : `Restore ${name} from its removal record`
+                            item.kind === "trash"
+                              ? `Restore ${name} from the trash`
+                              : item.kind === "agent_files"
+                                ? `Restore ${name}, Codex session logs`
+                                : `Restore ${name} from its removal record`
                           }
                         >
                           Restore

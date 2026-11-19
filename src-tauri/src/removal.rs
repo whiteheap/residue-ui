@@ -135,6 +135,9 @@ pub struct Removals {
     marker: PathBuf,
     /// The marker's next contents, renamed to `marker` once written whole.
     part: PathBuf,
+    schema: &'static str,
+    /// The word in the refusal: `removal` or `prune`.
+    word: &'static str,
     now: Mutex<InFlight>,
     /// Told on every move, for `wait`.
     moved: Condvar,
@@ -155,8 +158,30 @@ impl Removals {
     /// process took, and one the app cannot read, since it writes a marker
     /// whole (`Removing::record`).
     pub fn open(data_dir: &Path) -> Removals {
-        let marker = data_dir.join(MARKER);
-        let now = match read_marker(&marker) {
+        Self::open_marked(data_dir, MARKER, MARKER_PART, MARKER_SCHEMA, "removal")
+    }
+
+    /// One confirmed `agents prune` at a time, with its own marker, so a
+    /// worktree removal does not wait on it and it does not wait on one.
+    pub fn open_prune(data_dir: &Path) -> Removals {
+        Self::open_marked(
+            data_dir,
+            "prune-running.json",
+            "prune-running.json.part",
+            "residue-app.prune/v1",
+            "prune",
+        )
+    }
+
+    fn open_marked(
+        data_dir: &Path,
+        marker_name: &str,
+        part_name: &str,
+        schema: &'static str,
+        word: &'static str,
+    ) -> Removals {
+        let marker = data_dir.join(marker_name);
+        let now = match read_marker(&marker, schema) {
             Ok(None) => InFlight::None,
             Ok(Some(p)) if p.runs() => {
                 eprintln!("residue app: removal {p:?} runs on from an earlier launch");
@@ -175,7 +200,9 @@ impl Removals {
         };
         Removals {
             marker,
-            part: data_dir.join(MARKER_PART),
+            part: data_dir.join(part_name),
+            schema,
+            word,
             now: Mutex::new(now),
             moved: Condvar::new(),
         }
@@ -223,9 +250,10 @@ impl Removals {
         let mut now = self.lock();
         self.refresh(&mut now);
         if !self.apply(&mut now, &Event::Start) {
-            return Err(CliError::invalid(
-                "another removal is still running; try again when it ends",
-            ));
+            return Err(CliError::invalid(format!(
+                "another {} is still running; try again when it ends",
+                self.word
+            )));
         }
         drop(now);
         // Every return from here drops `removing`, which ends the removal.
@@ -299,7 +327,7 @@ impl Removing<'_> {
             return;
         };
         let written = serde_json::to_vec(&Marker {
-            schema: MARKER_SCHEMA.into(),
+            schema: removals.schema.into(),
             process,
         })
         .map_err(io::Error::other)
@@ -334,16 +362,16 @@ impl Process {
     }
 }
 
-fn read_marker(path: &Path) -> io::Result<Option<Process>> {
+fn read_marker(path: &Path, schema: &str) -> io::Result<Option<Process>> {
     let text = match fs::read(path) {
         Ok(text) => text,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(e),
     };
     let marker: Marker = serde_json::from_slice(&text).map_err(io::Error::other)?;
-    if marker.schema != MARKER_SCHEMA {
+    if marker.schema != schema {
         return Err(io::Error::other(format!(
-            "its schema is {}, not {MARKER_SCHEMA}",
+            "its schema is {}, not {schema}",
             marker.schema
         )));
     }

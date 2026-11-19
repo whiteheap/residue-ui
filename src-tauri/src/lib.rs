@@ -3,7 +3,7 @@
 //! Every check, size, removal and restore comes from the bundled `residue`
 //! binary. The commands here run it with explicit arguments and return its
 //! JSON documents (`residue.scan/v1`, `residue.agents/v1`, `residue.explain/v1`,
-//! `residue.remove/v1`, `residue.restore/v1`) to the window unchanged. The
+//! `residue.remove/v1`, `residue.agents-prune/v1`, `residue.restore/v1`) to the window unchanged. The
 //! window never decides on its own what is safe to remove.
 
 mod cli;
@@ -18,7 +18,7 @@ mod service;
 mod settings;
 
 use cli::{CliError, Document, ErrorKind, Run};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -45,6 +45,9 @@ struct State {
     /// The one confirmed removal that runs, this app's or, after a
     /// relaunch, the one an earlier launch left running (#12).
     removals: removal::Removals,
+    /// One confirmed `agents prune` at a time. It does not share the removal
+    /// marker: the two commands lock different files.
+    prunes: removal::Removals,
     /// The bundled residue's version, once a read has given it.
     version: Mutex<Option<String>>,
 }
@@ -618,7 +621,7 @@ fn restore_entry(s: &State, root: &str, shown: &entry::Shown) -> Result<Restored
             changed: true,
         });
     }
-    if out.code != Some(0) {
+    if !matches!(out.code, Some(0 | 3)) {
         return Err(out.error(ErrorKind::Failed, "residue could not restore it".into()));
     }
     let document = out.document("residue.restore/v1")?;
@@ -628,6 +631,113 @@ fn restore_entry(s: &State, root: &str, shown: &entry::Shown) -> Result<Restored
         unlike,
         changed: false,
     })
+}
+
+/// Ages the Agent data screen offers. No other duration is accepted.
+fn prune_duration(days: u32) -> Result<String, CliError> {
+    match days {
+        30 | 60 | 90 => Ok(format!("{days}d")),
+        _ => Err(CliError::invalid("choose 30, 60 or 90 days")),
+    }
+}
+
+fn agents_prune(
+    s: &State,
+    days: u32,
+    confirm: Option<(&str, &str)>,
+    started: impl FnOnce(u32),
+) -> Result<(Document, Option<i32>), CliError> {
+    let duration = prune_duration(days)?;
+    let mut args: Vec<OsString> = vec![
+        "agents".into(),
+        "prune".into(),
+        "--older-than".into(),
+        duration.into(),
+        "--json".into(),
+    ];
+    let confirmed = confirm.is_some();
+    if let Some((as_of, plan)) = confirm {
+        if !expect_token(plan) {
+            return Err(CliError::invalid(
+                "the plan has no fingerprint to confirm it with; close and try again",
+            ));
+        }
+        args.extend([
+            "--yes".into(),
+            "--as-of".into(),
+            as_of.into(),
+            "--expect".into(),
+            plan.into(),
+        ]);
+    }
+    let out = s.run_with(args, &s.home, AGENTS_DEADLINE, started)?;
+    match out.code {
+        Some(0 | 3) => Ok((out.document("residue.agents-prune/v1")?, out.code)),
+        Some(4) if confirmed => Ok((out.document("residue.agents-prune/v1")?, out.code)),
+        Some(2) => Err(out.error(
+            ErrorKind::Invalid,
+            "this residue has no agents prune command".into(),
+        )),
+        _ => Err(out.error(ErrorKind::Failed, "residue agents prune failed".into())),
+    }
+}
+
+#[derive(Deserialize)]
+struct PruneShown {
+    days: u32,
+    /// The plan's `generated_at`.
+    as_of: String,
+    plan: String,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+enum PruneConfirm {
+    Ran {
+        document: Document,
+        exit_code: Option<i32>,
+    },
+    /// Exit 4: nothing moved. `document` is the plan residue made.
+    Stale { document: Document },
+}
+
+/// `residue agents prune --older-than D --json` with no terminal. Moves nothing.
+#[tauri::command]
+async fn plan_agent_prune(state: AppState<'_>, days: u32) -> Result<Document, CliError> {
+    blocking(&state, move |s| Ok(agents_prune(s, days, None, |_| {})?.0)).await
+}
+
+/// Confirm the plan the dialog showed. `--yes` is added only with that plan's
+/// time and fingerprint. One prune at a time, including one an earlier launch
+/// left running.
+#[tauri::command]
+async fn confirm_agent_prune(
+    state: AppState<'_>,
+    shown: PruneShown,
+) -> Result<PruneConfirm, CliError> {
+    blocking(&state, move |s| {
+        let as_of = AsOf::of_plan(Some(shown.as_of))?.0;
+        let mut pruning = s.prunes.start()?;
+        let (document, exit_code) =
+            agents_prune(s, shown.days, Some((&as_of, &shown.plan)), |pid| {
+                pruning.record(pid);
+            })?;
+        drop(pruning);
+        if exit_code == Some(4) {
+            return Ok(PruneConfirm::Stale { document });
+        }
+        Ok(PruneConfirm::Ran {
+            document,
+            exit_code,
+        })
+    })
+    .await
+}
+
+/// Whether a confirmed prune is in flight.
+#[tauri::command]
+async fn prune_running(state: AppState<'_>) -> Result<bool, CliError> {
+    blocking(&state, |s| Ok(s.prunes.running())).await
 }
 
 /// `residue agents --json`: what Codex and Claude Code keep on disk. Roots
@@ -816,6 +926,7 @@ pub fn run() {
                 dev: service::DevPreview::from_env(),
                 changes: service::Changes::default(),
                 removals: removal::Removals::open(&data_dir),
+                prunes: removal::Removals::open_prune(&data_dir),
                 data_dir,
                 version: Mutex::new(None),
             };
@@ -843,6 +954,9 @@ pub fn run() {
             restore,
             stats,
             agents_report,
+            plan_agent_prune,
+            confirm_agent_prune,
+            prune_running,
             service_status,
             service_install,
             service_uninstall,
