@@ -26,11 +26,12 @@ type Phase =
  * checked again, every expired trash entry the run may purge, and every
  * removal record it may forget. The user confirms that list, and the confirm
  * sends it back (`shownOf`). src-tauri plans again at the click, with the
- * confirmed command without --yes, leaves out a worktree that changed (the
- * result names it), and runs nothing when the plan covers an entry or record
- * the dialog did not list; the dialog then plans again and says what
- * changed. Otherwise it runs the command with --yes and --as-of the shown
- * plan's time.
+ * confirmed command without --yes. When a worktree changed, or the plan
+ * covers an entry or record the dialog did not list, nothing runs and the
+ * dialog plans again and says what changed. Otherwise it runs those same
+ * paths with --yes, --as-of the shown plan's time and --expect that plan.
+ * When residue's own plan is another one, nothing moves and the dialog
+ * shows the plan residue made.
  */
 export function RemoveDialog({
   paths,
@@ -78,6 +79,12 @@ export function RemoveDialog({
             .planRemoval(paths)
             .then((p) => setPhase({ step: "plan", plan: p.document, folders: p.folders }))
             .catch((e) => setPhase({ step: "error", error: asCliError(e), plan: null }));
+          return;
+        }
+        if (r.outcome === "stale") {
+          // Exit 4: the document is the plan residue made. Nothing moved.
+          setChanged(["Confirm this plan to move what it shows now."]);
+          setPhase({ step: "plan", plan: r.document, folders: r.folders });
           return;
         }
         setPhase({ step: "done", result: r.document, dropped: r.dropped, unlisted: r.unlisted });

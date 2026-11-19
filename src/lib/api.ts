@@ -71,9 +71,10 @@ export const api = {
   explain: (path: string) => call<ExplainDocument>("explain", { path }),
   planRemoval: (paths: string[]) => call<Removal>("plan_removal", { paths }),
   /**
-   * `shown` is what the dialog showed of its plan. src-tauri plans again at
-   * the click, and runs nothing when that plan differs from it; otherwise
-   * residue judges every age at the shown plan's time (#13).
+   * `shown` is what the dialog showed of its plan, including its fingerprint.
+   * src-tauri plans again at the click and runs nothing when that plan
+   * differs. Otherwise residue removes only while its own plan is that one
+   * (`--expect`), judging every age at the shown plan's time (#13).
    */
   removeToTrash: (shown: ShownRemoval) => call<RemovalConfirm>("remove_to_trash", { shown }),
   /**
@@ -85,7 +86,7 @@ export const api = {
   /** Settles once no confirmed removal runs. */
   waitForRemoval: () => call<void>("wait_for_removal"),
   listRestorable: (roots: string[]) => call<Listing[]>("list_restorable", { roots }),
-  /** Restores only while the row's folder is still at its path (`src-tauri/src/entry.rs`). */
+  /** Restores only that row's entry: its folder still at its path, and its `id` as `--expect`. */
   restore: (root: string, shown: ShownEntry) => call<Restored>("restore", { root, shown }),
   serviceStatus: () => call<ServiceStatus>("service_status"),
   /** `basis` is the one the dialog showed; a fresh read that differs installs nothing. */

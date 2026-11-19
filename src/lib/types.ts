@@ -101,6 +101,8 @@ export interface TrashItem {
   reclaimable_bytes: number | null;
   registered: boolean;
   error: string | null;
+  /** The entry's id for `restore --expect`. Absent in a document from before residue 0.0.14. */
+  id?: string;
 }
 
 /** An ignored entry a deletion took, which restore does not bring back. */
@@ -156,6 +158,8 @@ export interface RemovalRecord {
   back_error: string | null;
   residue_version: string | null;
   error: string | null;
+  /** The record's id for `restore --expect`. Absent in a document from before residue 0.0.14. */
+  id?: string;
 }
 
 export interface Repository {
@@ -212,8 +216,12 @@ export interface RemoveDocument {
   trash: { enabled: boolean; keep: string; keep_seconds: number };
   /** The records this run writes, and `--keep-removed`: how long records are kept. */
   removal_records: { reason: string; by: string; keep: string; keep_seconds: number };
+  /** The plan's fingerprint, 32 lowercase hex digits. A confirm passes it as `--expect`. */
+  plan: string;
   results: {
     path: string;
+    /** Its repository's common Git directory, or null when the path names no worktree. */
+    repository: string | null;
     result: RemoveResult;
     reason: string | null;
     trash_entry: string | null;
@@ -310,6 +318,8 @@ export interface ShownWorktree {
   head: string | null;
   locked: boolean;
   folder: string | null;
+  /** The result's repository, compared again at the click. */
+  repository: string | null;
 }
 
 /**
@@ -318,6 +328,8 @@ export interface ShownWorktree {
  * (`src-tauri/src/plan.rs`).
  */
 export interface ShownRemoval {
+  /** The plan's fingerprint. The confirmed run passes it as `--expect`. */
+  plan: string;
   /** The plan's `as_of`: the confirmed run judges every age at it (#13). */
   as_of: string;
   worktrees: ShownWorktree[];
@@ -341,7 +353,13 @@ export type RemovalConfirm =
       dropped: string[];
       unlisted: string[];
     }
-  | { outcome: "changed"; changes: string[] };
+  | { outcome: "changed"; changes: string[] }
+  | {
+      /** Exit 4: nothing moved. `document` is the plan residue made. */
+      outcome: "stale";
+      document: RemoveDocument;
+      folders: Record<string, string>;
+    };
 
 /** How a restored worktree came back. */
 export type Checkout =
@@ -388,6 +406,8 @@ export interface Listing {
 /** A Restore row as the window shows it, which its click sends back. */
 export interface ShownEntry {
   kind: "trash" | "removed";
+  /** The listing's `id`, passed as `--expect`. */
+  id: string;
   entry: string;
   entry_path: string;
   original_path: string | null;
@@ -402,6 +422,8 @@ export interface ShownEntry {
 export interface Restored {
   document: RestoreDocument;
   unlike: string[];
+  /** Exit 4: the entry changed and nothing was restored. */
+  changed: boolean;
 }
 
 /**
@@ -420,6 +442,8 @@ export type Restorable = {
   error: string | null;
   /** Its folder, read when it was listed: a click restores only that folder. */
   folder: string | null;
+  /** Its `id` from the listing. A click without one restores nothing. */
+  id: string | null;
 } & (
   | { kind: "trash"; bytes: number | null; registered: boolean }
   | {
