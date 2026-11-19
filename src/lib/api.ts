@@ -17,6 +17,7 @@ import type {
   Settings,
   ShownEntry,
   ShownRemoval,
+  AgentsDocument,
   StatsDocument,
 } from "./types";
 
@@ -97,4 +98,6 @@ export const api = {
   /** The automatic cleanup dialog's folders as residue records them: each one's canonical path. */
   resolveFolders: (roots: string[]) => call<SaveFolder[]>("resolve_folders", { roots }),
   stats: () => call<StatsDocument>("stats"),
+  /** `residue agents --json` on the folders the app already scans. Exit 2: this residue has no such command. */
+  agentsReport: (roots: string[]) => call<AgentsDocument>("agents_report", { roots }),
 };

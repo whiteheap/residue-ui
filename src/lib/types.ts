@@ -276,6 +276,47 @@ export interface Freed extends FreedSum {
   by: Record<FreedBy, FreedSum>;
 }
 
+/** One store in `residue agents --json`. Sizes are null when nothing was measured. */
+export interface AgentStore {
+  store: string;
+  path: string;
+  verified: boolean;
+  source_url: string;
+  state: "ok" | "missing" | "unreadable" | "partial" | "symlink";
+  link_target: string | null;
+  files: number | null;
+  apparent_bytes: number | null;
+  allocated_bytes: number | null;
+  last_change: { unix: number; at: string; what: string } | null;
+  activity: "in_use" | "not_observed" | "unknown" | null;
+  activity_reason: string | null;
+  activity_detail: string | null;
+  processes: { pid: number; command: string }[] | null;
+  errors: string[];
+}
+
+/** Codex or Claude Code, as `residue.agents/v1` names one. */
+export interface AgentReport {
+  agent: string;
+  root: string;
+  root_source: string;
+  link_target: string | null;
+  stores: AgentStore[];
+  /** Scan worktrees with `owner` added. The screen links the path and draws no second verdict. */
+  worktrees: { path: string; owner: string }[];
+  own_cleanup: { what: string; doc: string }[];
+}
+
+/** `residue agents --json`. */
+export interface AgentsDocument {
+  schema: "residue.agents/v1";
+  version: string;
+  generated_at: string;
+  agents: AgentReport[];
+  errors: string[];
+  warnings: string[];
+}
+
 /** `residue stats --json`: what residue has freed on this machine, from its ledger (residue-cli#38). */
 export interface StatsDocument {
   schema: "residue.stats/v1";
