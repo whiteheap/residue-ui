@@ -2,7 +2,9 @@
 
 Up to 0.0.10, the Mac app shipped in each residue-cli release, with residue's version, and its notes are in [residue-cli's CHANGELOG](https://github.com/whiteheap/residue-cli/blob/main/CHANGELOG.md).
 
-## Unreleased
+## 0.0.13 (2026-11-19)
+
+The app shows what Codex and Claude Code keep on disk, and can move old Codex session logs to the trash after you confirm the plan. It bundles residue 0.0.16.
 
 - Agent data can move old Codex session logs to the trash. You choose 30, 60 or 90 days, residue shows the plan, and the confirm moves only that plan. Only Codex rollout files move. Restore puts an entry back until a later prune purges it.
 - Agent data shows what Codex and Claude Code keep on disk, from `residue agents`. Each store is one line: its size, when it last changed, and whether something has it open, in residue's words. A store residue could only partly read says so. Worktrees open on the Worktrees screen.
