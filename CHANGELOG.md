@@ -4,6 +4,7 @@ Up to 0.0.10, the Mac app shipped in each residue-cli release, with residue's ve
 
 ## Unreleased
 
+- Agent data shows what Codex and Claude Code keep on disk, from `residue agents`. Each store is one line: its size, when it last changed, and whether something has it open, in residue's words. A store residue could only partly read says so. Worktrees open on the Worktrees screen.
 - A confirmed removal moves only the plan its dialog showed. The click passes that plan's fingerprint to `residue remove --yes --as-of --expect`. When a worktree, a trash entry or a removal record changed since, residue moves nothing and the dialog shows the plan it made, to confirm again. Before, a change in the moment after the click's check could still be moved.
 - A Restore click restores only the entry its row listed. It passes that entry's id to `residue restore --expect`. When another entry is at that path, residue restores nothing and the list refreshes. Before, the click restored whichever entry the path named when it ran.
 - The app bundles residue 0.0.14. A trash entry keeps the `--keep-trash` it was written with, so one trashed for longer than 7 days is not purged at 7 days, and `watch` no longer deletes a tag or other ref a fetch refspec covers. [residue-cli's CHANGELOG](https://github.com/whiteheap/residue-cli/blob/main/CHANGELOG.md#0014-2026-11-11) has the rest.

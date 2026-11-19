@@ -3,6 +3,7 @@ import {
   ChartBar,
   ClockCounterClockwise,
   FolderSimple,
+  HardDrives,
   TreeStructure,
   type Icon,
 } from "@phosphor-icons/react";
@@ -17,6 +18,7 @@ import { cleanedSinceLastOpen, rememberFreed, sinceLastOpen } from "./lib/freed"
 import { confirmedRoots, stillSuggested, unconfirmedRoots } from "./lib/folders";
 import { bytes } from "./lib/format";
 import type { InFlight, Settings } from "./lib/types";
+import { AgentData } from "./views/AgentData";
 import type { Filter } from "./lib/viz";
 import { useCli } from "./lib/useCli";
 import { Automatic } from "./views/Automatic";
@@ -27,7 +29,7 @@ import { RemoveDialog } from "./views/RemoveDialog";
 import { Restore } from "./views/Restore";
 import { Worktrees } from "./views/Worktrees";
 
-type View = "worktrees" | "restore" | "automatic" | "freed" | "folders";
+type View = "worktrees" | "restore" | "automatic" | "freed" | "folders" | "agents";
 
 const NAV: { view: View; label: string; icon: Icon; key: string }[] = [
   { view: "worktrees", label: "Worktrees", icon: TreeStructure, key: "1" },
@@ -35,6 +37,7 @@ const NAV: { view: View; label: string; icon: Icon; key: string }[] = [
   { view: "automatic", label: "Automatic cleanup", icon: ArrowsClockwise, key: "3" },
   { view: "freed", label: "Freed", icon: ChartBar, key: "4" },
   { view: "folders", label: "Folders", icon: FolderSimple, key: "5" },
+  { view: "agents", label: "Agent data", icon: HardDrives, key: "6" },
 ];
 
 const NO_ROOTS: string[] = [];
@@ -180,7 +183,7 @@ export function App() {
     [reloadStats],
   );
 
-  // Command-1..5 switch screens, Command-R refreshes, Escape leaves a detail.
+  // Command-1..6 switch screens, Command-R refreshes, Escape leaves a detail.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (removing) return;
@@ -357,6 +360,16 @@ export function App() {
                 refreshKey={refreshKey}
                 scanDoc={scanDoc}
                 scanning={scanQ.loading}
+              />
+            ) : view === "agents" ? (
+              <AgentData
+                roots={roots}
+                home={home}
+                refreshKey={refreshKey}
+                onOpenWorktree={(path) => {
+                  go("worktrees");
+                  open(path);
+                }}
               />
             ) : view === "freed" ? (
               <Freed

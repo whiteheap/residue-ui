@@ -16,6 +16,7 @@ pub const COMMANDS: &[&str] = &[
     "list_restorable",
     "restore",
     "stats",
+    "agents_report",
     "service_status",
     "service_install",
     "service_uninstall",

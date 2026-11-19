@@ -2,7 +2,7 @@
 //!
 //! Every check, size, removal and restore comes from the bundled `residue`
 //! binary. The commands here run it with explicit arguments and return its
-//! JSON documents (`residue.scan/v1`, `residue.explain/v1`,
+//! JSON documents (`residue.scan/v1`, `residue.agents/v1`, `residue.explain/v1`,
 //! `residue.remove/v1`, `residue.restore/v1`) to the window unchanged. The
 //! window never decides on its own what is safe to remove.
 
@@ -32,6 +32,7 @@ const SCAN_DEADLINE: Duration = Duration::from_secs(30 * 60);
 const REMOVE_DEADLINE: Duration = Duration::from_secs(30 * 60);
 const RESTORE_DEADLINE: Duration = Duration::from_secs(10 * 60);
 const STATS_DEADLINE: Duration = Duration::from_secs(2 * 60);
+const AGENTS_DEADLINE: Duration = Duration::from_secs(3 * 60);
 
 struct State {
     sidecar: PathBuf,
@@ -629,6 +630,30 @@ fn restore_entry(s: &State, root: &str, shown: &entry::Shown) -> Result<Restored
     })
 }
 
+/// `residue agents --json`: what Codex and Claude Code keep on disk. Roots
+/// are the folders the app already scans, so Claude worktrees under them
+/// are included. The command reads nothing itself. Exit 2 is a residue
+/// that has no `agents` command: kind `invalid`, nothing else changes.
+#[tauri::command]
+async fn agents_report(state: AppState<'_>, roots: Vec<String>) -> Result<Document, CliError> {
+    blocking(&state, move |s| {
+        let mut args: Vec<OsString> = vec!["agents".into(), "--json".into()];
+        if !roots.is_empty() {
+            let roots = settings::folders(&roots)?;
+            args.extend(roots.into_iter().map(PathBuf::into_os_string));
+        }
+        let out = s.run(args, &s.home, AGENTS_DEADLINE)?;
+        if out.code == Some(2) {
+            return Err(out.error(
+                ErrorKind::Invalid,
+                "this residue has no agents command".into(),
+            ));
+        }
+        out.document("residue.agents/v1")
+    })
+    .await
+}
+
 /// `residue stats --json`: what residue has freed on this machine, from its
 /// ledger. It reads the ledger and the trash entries of the repositories the
 /// ledger names, never a worktree, so it is quick.
@@ -817,6 +842,7 @@ pub fn run() {
             list_restorable,
             restore,
             stats,
+            agents_report,
             service_status,
             service_install,
             service_uninstall,
