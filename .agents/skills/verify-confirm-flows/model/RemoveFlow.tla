@@ -5,8 +5,9 @@
 (* dialog (src/views/RemoveDialog.tsx), and the two runs of                *)
 (* `residue remove --trash --json PATH...` it starts through               *)
 (* src-tauri/src/lib.rs: the plan without --yes, and after the confirm the *)
-(* same command with --yes. Each reply can come late, fail, or find the    *)
-(* window gone. src-tauri knows when a confirmed run is in flight, also    *)
+(* same paths with --yes --as-of --expect of that plan. Each reply can     *)
+(* come late, fail, or find the window gone. src-tauri knows when a        *)
+(* confirmed run is in flight, also                                        *)
 (* one an earlier launch of the app started, and the window asks it        *)
 (* (src-tauri/src/removal.rs, #12). At the click src-tauri plans again,    *)
 (* and runs nothing when that plan differs from the one the dialog showed  *)
@@ -32,8 +33,8 @@ CONSTANTS
   MaxReplaces, \* how many times the worktree at a path changes and can still go
   InUse,       \* TRUE: the expired trash entry of "r1" is in use at first
   DuringRun    \* TRUE: a worktree at a path can also change between
-               \* src-tauri's plan at the click and residue's own plan in
-               \* the confirmed run
+               \* src-tauri's plan at the click and residue's own plan.
+               \* --expect then moves nothing, unless Mut("NoRemoveExpect")
 
 Mut(name) == name \in Broken
 
@@ -73,11 +74,13 @@ Phases == {"none", "planning", "plan", "running", "done", "error", "broken"}
 \* In "error", `withPlan` is the text that says to scan again to see what
 \* moved; without it the dialog says that nothing moved. `ids` is the
 \* worktree the plan reported at each path, and `purges` the trash entries
-\* it lists.
+\* it lists. `heldAt` is which of those entries were in use when the plan
+\* was made: `--expect` covers what the plan does with each one.
 NoId == [v |-> 0, r |-> "none"]
 Closed == [open |-> FALSE, id |-> 0, paths |-> {}, req |-> 0, phase |-> "none",
            ready |-> {}, planFor |-> {}, withPlan |-> FALSE, ok |-> TRUE,
-           moved |-> {}, ids |-> [w \in W |-> NoId], purges |-> {}]
+           moved |-> {}, ids |-> [w \in W |-> NoId], purges |-> {},
+           heldAt |-> [x \in Repos |-> FALSE]]
 
 \* The worktree at path w now: which one, and its repository.
 Id(w) == [v |-> ver[w], r |-> repo[w]]
@@ -99,10 +102,12 @@ TypeOK ==
   /\ dlg.paths \subseteq W /\ dlg.ready \subseteq W /\ dlg.planFor \subseteq W
   /\ dlg.moved \subseteq W /\ dlg.ok \in BOOLEAN /\ dlg.withPlan \in BOOLEAN
   /\ dlg.ids \in [W -> Ids] /\ dlg.purges \subseteq Repos
+  /\ dlg.heldAt \in [Repos -> BOOLEAN]
   /\ \A p \in plans : p.paths \subseteq W
   /\ \A r \in runs : r.args \subseteq W /\ r.sent \subseteq W /\ r.listed \subseteq W
                      /\ r.st \in {"checking", "sent", "moved"} /\ r.moved \subseteq W
                      /\ r.ids \in [W -> Ids] /\ r.purges \subseteq Repos
+                     /\ r.heldAt \in [Repos -> BOOLEAN]
                      /\ r.app \in Nat
   /\ heard \in {"asking", "none", "running"}
   /\ app \in Nat
@@ -304,7 +309,7 @@ PlanLands == \E p \in plans :
                  THEN [dlg EXCEPT !.phase = "plan", !.ready = Moves(p.paths) \ mv,
                                   !.planFor = p.paths, !.moved = @ \cup mv,
                                   !.ids = [w \in W |-> IF w \in p.paths THEN Id(w) ELSE NoId],
-                                  !.purges = Listed(p.paths)]
+                                  !.purges = Listed(p.paths), !.heldAt = held]
                  ELSE IF dlg.id = p.dlg THEN [dlg EXCEPT !.moved = @ \cup mv]
                  ELSE dlg
   /\ UNCHANGED <<ver, repo, held, gone, shown, scan, sel, det, runs, heard, win, app, n,
@@ -337,6 +342,7 @@ YouConfirm ==
                                    args |-> IF Mut("ConfirmSendsChoice") THEN dlg.paths ELSE dlg.ready,
                                    sent |-> IF Mut("ConfirmSendsChoice") THEN dlg.paths ELSE dlg.ready,
                                    listed |-> dlg.ready, ids |-> dlg.ids, purges |-> dlg.purges,
+                                   heldAt |-> dlg.heldAt,
                                    st |-> IF Mut("NoReplan") THEN "sent" ELSE "checking",
                                    moved |-> {}]}
             /\ dlg' = [dlg EXCEPT !.phase = "running"]
@@ -344,19 +350,18 @@ YouConfirm ==
   /\ UNCHANGED <<truth, ver, repo, held, gone, shown, scan, sel, det, plans, heard, win, app, wrong, wrongPurge>>
 
 \* src-tauri's plan at the click: the confirmed command without --yes, for
-\* the paths sent (`confirm` in lib.rs, `plan::check`). A path that no longer
-\* names the worktree the list showed, or whose worktree residue would no
-\* longer move, is left out of the run, and the rest are planned again on
-\* their own (one step with the first plan here). They run when every trash
-\* entry their run would cover is one the list showed. Otherwise nothing
-\* runs, the removal ends, and the dialog plans your choice again and says
-\* what changed. "ReplanVerdictOnly" compares only that each can still go;
-\* "ReplanNoEntries" does not compare the trash entries.
+\* the paths sent (`confirm` in lib.rs, `plan::check`). They run only when
+\* every path still names the worktree the list showed and residue would
+\* still move it, and every trash entry the run would cover is one the list
+\* showed. `--expect` names that whole plan, so a run of fewer paths is a
+\* different plan and runs nothing. The dialog then plans your choice again
+\* and says what changed. "ReplanVerdictOnly" compares only that each can
+\* still go; "ReplanNoEntries" does not compare the trash entries.
 ReplanLands == \E r \in runs :
   /\ r.st = "checking"
   /\ LET keep == {w \in r.args : truth[w] = "go" /\ (Mut("ReplanVerdictOnly") \/ Id(w) = r.ids[w])}
          listed(paths) == Mut("ReplanNoEntries") \/ Expired(paths) \subseteq r.purges
-     IN IF keep # {} /\ listed(keep)
+     IN IF keep = r.args /\ listed(keep)
           THEN /\ runs' = (runs \ {r}) \cup {[r EXCEPT !.st = "sent", !.args = keep]}
                /\ UNCHANGED <<dlg, plans, n>>
           ELSE /\ runs' = runs \ {r}
@@ -380,21 +385,37 @@ ReplanFails == \E r \in runs :
   /\ UNCHANGED <<truth, ver, repo, held, gone, shown, scan, sel, det, plans, heard, win, app, n,
                  wrong, wrongPurge>>
 
-\* residue's confirmed run makes its own plan, checks every path once more
-\* against it, and moves the ones that can still go, as they are now. It
-\* purges each expired trash entry of the repositories it covers that is
-\* not in use.
+\* residue's confirmed run makes its own plan and compares it with the one
+\* the dialog showed (`--expect`). When a worktree at a sent path changed,
+\* residue would no longer move it, or an expired trash entry would be
+\* purged where the plan kept it, the run removes nothing and the dialog
+\* shows the plan as it is now. "NoRemoveExpect" drops `--expect`: the run
+\* moves what can still go, as it is now, and purges each expired trash
+\* entry of the repositories it covers that is not in use.
 RunMoves == \E r \in runs :
   /\ r.st = "sent"
   /\ LET mv == Moves(r.args)
          pg == {x \in Expired(r.args) : ~held[x]}
-     IN /\ truth' = [w \in W |-> IF w \in mv THEN "trash" ELSE truth[w]]
-        /\ gone' = gone \cup pg
-        /\ wrong' = wrong \cup {w \in mv : w \notin r.listed \/ Id(w) # r.ids[w]}
-        /\ wrongPurge' = wrongPurge \cup (pg \ r.purges)
-        /\ runs' = (runs \ {r}) \cup {[r EXCEPT !.st = "moved", !.moved = mv]}
-        /\ dlg' = IF dlg.id = r.dlg THEN [dlg EXCEPT !.moved = @ \cup mv] ELSE dlg
-  /\ UNCHANGED <<ver, repo, held, shown, scan, sel, det, plans, heard, win, app, n>>
+         stale == \/ \E w \in r.args : Id(w) # r.ids[w] \/ truth[w] # "go"
+                  \/ \E x \in Expired(r.args) : held[x] # r.heldAt[x]
+     IN IF stale /\ ~Mut("NoRemoveExpect")
+          THEN /\ runs' = runs \ {r}
+               /\ IF dlg.id = r.dlg /\ dlg.phase # "broken"
+                    THEN dlg' = [dlg EXCEPT !.phase = "plan",
+                                          !.ready = {w \in dlg.paths : truth[w] = "go"},
+                                          !.ids = [w \in W |-> IF w \in dlg.paths THEN Id(w) ELSE NoId],
+                                          !.purges = Listed(dlg.paths),
+                                          !.heldAt = held]
+                    ELSE UNCHANGED dlg
+               /\ UNCHANGED <<truth, gone, wrong, wrongPurge, plans, n>>
+          ELSE /\ truth' = [w \in W |-> IF w \in mv THEN "trash" ELSE truth[w]]
+               /\ gone' = gone \cup pg
+               /\ wrong' = wrong \cup {w \in mv : w \notin r.listed \/ Id(w) # r.ids[w]}
+               /\ wrongPurge' = wrongPurge \cup (pg \ r.purges)
+               /\ runs' = (runs \ {r}) \cup {[r EXCEPT !.st = "moved", !.moved = mv]}
+               /\ dlg' = IF dlg.id = r.dlg THEN [dlg EXCEPT !.moved = @ \cup mv] ELSE dlg
+               /\ UNCHANGED <<plans, n>>
+  /\ UNCHANGED <<ver, repo, held, shown, scan, sel, det, heard, win, app>>
 
 \* The report lands: the dialog shows it, and App's onRemoved runs even when
 \* the dialog has closed: it unticks what moved, leaves the checks of a

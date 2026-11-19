@@ -1,14 +1,15 @@
 //! What a Restore click is bound to: the trash entry or removal record its
 //! row showed (`Shown`).
 //!
-//! residue restores the entry its `entry_path` names when it runs, and it
-//! resolves that path again then. So the listing reads each entry's folder
-//! (`folder::id`) right after residue listed it, and the click compares it
-//! with the folder at that path before residue runs (`check`): another
-//! folder renamed into a folder on the path, or a link put there, makes it
-//! another folder, and the click runs nothing. After the run, `unlike`
-//! compares residue's answer, which names the entry it restored as it was
-//! before, with the row.
+//! residue restores the entry its `entry_path` names when it runs. The
+//! listing reads each entry's folder (`folder::id`) right after residue
+//! listed it, and the click compares it with the folder at that path before
+//! residue runs (`check`): another folder renamed into a folder on the path,
+//! or a link put there, makes it another folder, and the click runs nothing.
+//! The click also passes the row's `id` as `--expect` (`lib.rs`), so an
+//! entry that took that path's place restores nothing. After a run that
+//! restores, `unlike` compares residue's answer, which names the entry it
+//! restored as it was before, with the row.
 
 use crate::env::tilde;
 use crate::folder;
@@ -22,6 +23,8 @@ use std::path::Path;
 pub struct Shown {
     /// `trash` or `removed`.
     pub kind: String,
+    /// The listing's `id`, which the click passes as `--expect`.
+    pub id: String,
     pub entry: String,
     pub entry_path: String,
     pub original_path: Option<String>,
@@ -185,6 +188,7 @@ mod tests {
         let s = |k: &str| v[k].as_str().map(String::from);
         let kind = s("kind").unwrap();
         Shown {
+            id: s("id").unwrap_or_else(|| "a".repeat(32)),
             at: s(if kind == "trash" {
                 "trashed_at"
             } else {

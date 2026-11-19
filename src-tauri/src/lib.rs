@@ -279,8 +279,16 @@ impl AsOf {
     }
 }
 
+/// A `plan` or an entry `id` as residue writes it: 32 lowercase hex digits.
+fn expect_token(value: &str) -> bool {
+    value.len() == 32
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 /// Which run of `residue remove --trash --json PATH...`. Only `Confirmed`
-/// adds `--yes`, and never without `--as-of`.
+/// adds `--yes`, and never without `--as-of` and `--expect`.
 enum Step<'a> {
     /// The dialog's plan. Without `--yes`, and with stdin that is not a
     /// terminal, residue removes and purges nothing and prints its plan: each
@@ -289,13 +297,16 @@ enum Step<'a> {
     Plan,
     /// The plan again at the click: the confirmed command without `--yes`.
     Again(&'a AsOf),
-    /// The confirmed run: `--yes --as-of TIME`.
-    Confirmed(&'a AsOf),
+    /// The confirmed run: `--yes --as-of TIME --expect PLAN`.
+    Confirmed(&'a AsOf, &'a str),
 }
 
 /// One run of `residue remove`, and its document. 0: every path went to the
 /// trash. 3: at least one stayed (or, for a plan, nothing was confirmed), and
-/// the document says why. Anything else is an error without a document.
+/// the document says why. 4, only on a confirmed run: residue's own plan was
+/// not the one `--expect` named, so it removed, trashed, purged and forgot
+/// nothing, and the document is the plan it made. Anything else is an error
+/// without a document.
 fn remove(
     s: &State,
     paths: &[String],
@@ -306,11 +317,18 @@ fn remove(
         return Err(CliError::invalid("no worktrees were selected"));
     }
     let mut args: Vec<OsString> = vec!["remove".into(), "--trash".into(), "--json".into()];
+    let confirmed = matches!(step, Step::Confirmed(_, _));
     match step {
         Step::Plan => {}
         Step::Again(AsOf(time)) => args.extend(["--as-of".into(), time.into()]),
-        Step::Confirmed(AsOf(time)) => {
-            args.extend(["--yes".into(), "--as-of".into(), time.into()]);
+        Step::Confirmed(AsOf(time), plan) => {
+            args.extend([
+                "--yes".into(),
+                "--as-of".into(),
+                time.into(),
+                "--expect".into(),
+                plan.into(),
+            ]);
         }
     }
     for p in paths {
@@ -319,6 +337,7 @@ fn remove(
     let out = s.run_with(args, &s.home, REMOVE_DEADLINE, started)?;
     match out.code {
         Some(0 | 3) => Ok((out.document("residue.remove/v1")?, out.code)),
+        Some(4) if confirmed => Ok((out.document("residue.remove/v1")?, out.code)),
         _ => Err(out.error(ErrorKind::Failed, "residue remove failed".into())),
     }
 }
@@ -363,6 +382,13 @@ enum Confirm {
     /// entry or removal record the dialog did not list. One line per change
     /// (`plan::check`).
     Changed { changes: Vec<String> },
+    /// residue's own plan was not the one the dialog showed (`--expect`,
+    /// exit 4). Nothing was removed. `document` is the plan residue made,
+    /// which the dialog shows and a later confirm sends back.
+    Stale {
+        document: Document,
+        folders: BTreeMap<String, String>,
+    },
 }
 
 /// Move what the dialog showed to the trash (`shown`): its worktrees, judging
@@ -377,15 +403,20 @@ enum Confirm {
 ///
 /// Then it plans again, with the confirmed command without `--yes`
 /// (`plan::check`). A worktree that is not the one the dialog showed, or
-/// that residue would no longer move, is left out. The rest are planned
-/// again on their own, since the run covers the trash of their repositories
-/// only, and run when that plan is the one shown; a trash entry or removal
-/// record the dialog did not list there runs nothing. The run is
-/// the command with `--yes`, where residue checks every path once more
-/// against the plan that run makes, and keeps any that changed. A change in
-/// the moment between the last plan and the run's own goes unseen until the
-/// run reports it (`unlisted`).
+/// that residue would no longer move, is left out, and a trash entry or
+/// removal record the dialog did not list runs nothing. Any such difference
+/// runs nothing: the confirmed run is the same paths, with `--yes`,
+/// `--as-of` and `--expect` of the plan the dialog showed. residue makes
+/// its own plan before it moves anything and, when that is another one,
+/// exits 4 and moves nothing (`Confirm::Stale`). The dialog shows that
+/// plan. A run that does move still names what it did that the dialog did
+/// not show (`unlisted`).
 fn confirm(s: &State, shown: &plan::Shown) -> Result<Confirm, CliError> {
+    let Some(plan) = shown.plan.as_deref().filter(|p| expect_token(p)) else {
+        return Err(CliError::invalid(
+            "the plan has no fingerprint to confirm it with; close and try again",
+        ));
+    };
     let as_of = AsOf::of_plan(shown.as_of.clone())?;
     let paths: Vec<String> = shown.worktrees.iter().map(|w| w.path.clone()).collect();
     if paths.is_empty() {
@@ -407,30 +438,30 @@ fn confirm(s: &State, shown: &plan::Shown) -> Result<Confirm, CliError> {
             })
     };
     let first = plan_again(&paths)?;
-    let (run, dropped) = if first.same() {
-        (paths, Vec::new())
-    } else if first.keep.is_empty() {
+    // `--expect` names the dialog's plan, which covers these paths. A run of
+    // fewer of them is a different plan, so any difference here runs nothing.
+    if !first.same() {
         return Ok(Confirm::Changed {
             changes: first.dropped.into_iter().chain(first.entries).collect(),
         });
-    } else {
-        let rest = plan_again(&first.keep)?;
-        if !rest.same() {
-            return Ok(Confirm::Changed {
-                changes: first
-                    .dropped
-                    .into_iter()
-                    .chain(rest.dropped)
-                    .chain(rest.entries)
-                    .collect(),
-            });
-        }
-        (first.keep, first.dropped)
-    };
-    let (document, exit_code) = remove(s, &run, Step::Confirmed(&as_of), |pid| {
+    }
+    let (document, exit_code) = remove(s, &paths, Step::Confirmed(&as_of, plan), |pid| {
         removing.record(pid);
     })?;
     drop(removing);
+    if exit_code == Some(4) {
+        let folders = read_plan(&document)
+            .map(|fresh| fresh.folders())
+            .map_err(|e| CliError {
+                kind: ErrorKind::Invalid,
+                message: format!(
+                    "residue refused that plan, and the app could not read the one it made: {}",
+                    e.message
+                ),
+                ..e
+            })?;
+        return Ok(Confirm::Stale { document, folders });
+    }
     let unlisted = match read_plan(&document) {
         Ok(ran) => plan::unlisted(shown, &ran, &s.home),
         Err(e) => vec![format!(
@@ -441,14 +472,14 @@ fn confirm(s: &State, shown: &plan::Shown) -> Result<Confirm, CliError> {
     Ok(Confirm::Ran {
         document,
         exit_code,
-        dropped,
+        dropped: Vec::new(),
         unlisted,
     })
 }
 
 /// Move to the trash what the dialog showed (`confirm`). Without a plan's
-/// time, or with a value that is not one, it runs nothing and returns kind
-/// `invalid`.
+/// time or fingerprint, or with a value that is not one, it runs nothing
+/// and returns kind `invalid`.
 #[tauri::command]
 async fn remove_to_trash(state: AppState<'_>, shown: plan::Shown) -> Result<Confirm, CliError> {
     blocking(&state, move |s| confirm(s, &shown)).await
@@ -534,14 +565,19 @@ fn list(s: &State, roots: &[String]) -> Result<Vec<Listing>, CliError> {
 struct Restored {
     document: Document,
     /// How residue's answer differs from the row the click showed, one line
-    /// each (`entry::unlike`). Empty: it restored that row's entry.
+    /// each (`entry::unlike`). Empty: it restored that row's entry, or
+    /// `changed` and it restored nothing.
     unlike: Vec<String>,
+    /// Exit 4: ENTRY now names another entry than the row's `id`. Nothing
+    /// was restored. The document lists the entry that is there now.
+    changed: bool,
 }
 
-/// `residue restore --json ENTRY_PATH` for the row the click showed
-/// (`shown`), run in the folder that listed it. When the folder at
-/// `entry_path` is not the one the listing read (`entry::check`), it runs
-/// nothing and returns kind `invalid`.
+/// `residue restore --json --expect ID ENTRY_PATH` for the row the click
+/// showed (`shown`), run in the folder that listed it. When the folder at
+/// `entry_path` is not the one the listing read (`entry::check`), or the
+/// row has no `id` residue would accept, it runs nothing and returns kind
+/// `invalid`. Exit 4 restores nothing: the entry there is another one.
 #[tauri::command]
 async fn restore(
     state: AppState<'_>,
@@ -557,17 +593,40 @@ fn restore_entry(s: &State, root: &str, shown: &entry::Shown) -> Result<Restored
         .pop()
         .ok_or_else(|| CliError::invalid("no folder to restore from"))?;
     entry::check(shown, &s.home).map_err(CliError::invalid)?;
+    if !expect_token(&shown.id) {
+        return Err(CliError::invalid(
+            "this entry has no id to restore it by; refresh and try again",
+        ));
+    }
     let out = s.run(
-        vec!["restore".into(), "--json".into(), path.into_os_string()],
+        vec![
+            "restore".into(),
+            "--json".into(),
+            "--expect".into(),
+            shown.id.clone().into(),
+            path.into_os_string(),
+        ],
         &root,
         RESTORE_DEADLINE,
     )?;
+    if out.code == Some(4) {
+        let document = out.document("residue.restore/v1")?;
+        return Ok(Restored {
+            document,
+            unlike: Vec::new(),
+            changed: true,
+        });
+    }
     if out.code != Some(0) {
         return Err(out.error(ErrorKind::Failed, "residue could not restore it".into()));
     }
     let document = out.document("residue.restore/v1")?;
     let unlike = entry::unlike(shown, document.get(), &s.home);
-    Ok(Restored { document, unlike })
+    Ok(Restored {
+        document,
+        unlike,
+        changed: false,
+    })
 }
 
 /// `residue stats --json`: what residue has freed on this machine, from its

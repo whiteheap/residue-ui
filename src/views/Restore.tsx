@@ -31,6 +31,7 @@ function restorables(listings: Listing[]): Restorable[] {
         at: t.trashed_at,
         error: t.error,
         folder: l.folders[t.entry_path] ?? null,
+        id: t.id ?? null,
         bytes: t.reclaimable_bytes,
         registered: t.registered,
       });
@@ -49,6 +50,7 @@ function restorables(listings: Listing[]): Restorable[] {
         at: r.removed_at,
         error: r.error,
         folder: l.folders[r.entry_path] ?? null,
+        id: r.id ?? null,
         state: r.state,
         reason: r.reason,
         freed: r.allocated_bytes,
@@ -72,6 +74,7 @@ function restorables(listings: Listing[]): Restorable[] {
 function shownEntry(item: Restorable): ShownEntry {
   return {
     kind: item.kind,
+    id: item.id ?? "",
     entry: item.name,
     entry_path: item.entryPath,
     original_path: item.originalPath,
@@ -210,8 +213,15 @@ export function Restore({
     setWorking(item.entryPath);
     setOutcome(null);
     try {
-      const { document, unlike } = await api.restore(item.root, shownEntry(item));
-      setOutcome({ ok: true, lines: restoredText(document, item, home), unlike });
+      const { document, unlike, changed } = await api.restore(item.root, shownEntry(item));
+      if (changed) {
+        setOutcome({
+          ok: false,
+          lines: ["This entry changed, so nothing was restored. The list shows what is there now."],
+        });
+      } else {
+        setOutcome({ ok: true, lines: restoredText(document, item, home), unlike });
+      }
     } catch (e) {
       setOutcome({ ok: false, lines: [`Could not restore ${item.name}`], error: asCliError(e) });
     } finally {
@@ -293,7 +303,16 @@ export function Restore({
               hint={namesTo(outcome.error.stderr) ? "To restore it at another path, run residue restore with --to in a terminal." : undefined}
               stderrOpen={namesTo(outcome.error.stderr)}
             />
-          ) : null
+          ) : (
+            <section className="notice" role="alert">
+              <h2>
+                <span className="warn">Nothing restored</span>
+              </h2>
+              {outcome.lines.map((line) => (
+                <p key={line}>{line}</p>
+              ))}
+            </section>
+          )
         ) : null}
         {error ? <ErrorPanel title="residue could not list what it can restore" error={error} /> : null}
         {failed.map((l) => (

@@ -22,12 +22,18 @@ ConfirmWhileBusy               remove/draw       OneRemovalAtATime
 ConfirmWhileBusy               remove/reload     OneRemovalAtATime
 # The plan at the click (ReplanLands) backs the dialog's list of every
 # expired trash entry: it refuses a run whose plan covers an entry the
-# dialog did not send back.
-NoReplan                       remove/no-faults  OnlyListedWorktreesMove
-NoReplan                       remove/no-faults  OnlyListedEntriesPurged
-ReplanVerdictOnly              remove/no-faults  OnlyListedWorktreesMove
-ReplanNoEntries+ReplanVerdictOnly remove/no-faults OnlyListedEntriesPurged
-ListsOnlySkipped+ReplanNoEntries remove/no-faults OnlyListedEntriesPurged
+# dialog did not send back. --expect (NoRemoveExpect) backs that plan for
+# the moment after it, the way NoExpect backs install, so the guards of
+# that moment keep their rules only once NoRemoveExpect is gone too.
+NoReplan+NoRemoveExpect        remove/no-faults  OnlyListedWorktreesMove
+NoReplan+NoRemoveExpect        remove/no-faults  OnlyListedEntriesPurged
+ReplanVerdictOnly+NoRemoveExpect remove/no-faults OnlyListedWorktreesMove
+ReplanNoEntries+ReplanVerdictOnly+NoRemoveExpect remove/no-faults OnlyListedEntriesPurged
+ListsOnlySkipped+ReplanNoEntries+NoRemoveExpect remove/no-faults OnlyListedEntriesPurged
+# --expect on the confirmed removal. Without it, a worktree that changes
+# after the plan at the click and before residue's own plan is moved.
+NoRemoveExpect                 remove/during     OnlyListedWorktreesMove
+NoRemoveExpect                 remove/during     OnlyListedEntriesPurged
 # SaveFlow.tla. --expect (NoExpect) backs install's own read: residue
 # compares again right before it writes, so the guards of that read keep
 # their rules only once NoExpect is gone too.

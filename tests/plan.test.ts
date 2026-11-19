@@ -86,8 +86,8 @@ const plan = {
   trash: { enabled: true, keep: "7d", keep_seconds: 604800 },
   removal_records: { reason: "remove", by: "remove", keep: "30d", keep_seconds: 2592000 },
   results: [
-    { path: "/Users/me/src/wt2", result: "skipped", reason: "stdin is not a terminal", trash_entry: null, removal_record: null, worktree: worktree("/Users/me/src/wt2", "b-wt2", "candidate") },
-    { path: "/Users/me/src/wt3", result: "refused", reason: "one or more checks did not pass", trash_entry: null, removal_record: null, worktree: worktree("/Users/me/src/wt3", "b-wt3", "keep") },
+    { path: "/Users/me/src/wt2", repository: "/Users/me/src/repo/.git", result: "skipped", reason: "stdin is not a terminal", trash_entry: null, removal_record: null, worktree: worktree("/Users/me/src/wt2", "b-wt2", "candidate") },
+    { path: "/Users/me/src/wt3", repository: "/Users/me/src/repo/.git", result: "refused", reason: "one or more checks did not pass", trash_entry: null, removal_record: null, worktree: worktree("/Users/me/src/wt3", "b-wt3", "keep") },
   ],
   purged: [
     // In use while residue planned: kept now, judged again by the run.
@@ -101,6 +101,7 @@ const plan = {
   errors: [],
   warnings: [],
   stats: {},
+  plan: "0123456789abcdef0123456789abcdef",
 } as unknown as RemoveDocument;
 
 test("the dialog lists every trash entry and record the run may delete, kept ones too", () => {
@@ -120,6 +121,7 @@ test("the dialog lists every trash entry and record the run may delete, kept one
 test("a confirm sends what the dialog showed: the worktrees it moves, as they were, and every entry", () => {
   const shown = shownOf(plan, { "/Users/me/src/wt2": "16777232:4242", "/Users/me/src/wt3": "16777232:4243" });
   assert.equal(shown.as_of, "2026-11-10T11:38:35Z");
+  assert.equal(shown.plan, "0123456789abcdef0123456789abcdef");
   assert.deepEqual(shown.worktrees, [
     {
       path: "/Users/me/src/wt2",
@@ -128,6 +130,7 @@ test("a confirm sends what the dialog showed: the worktrees it moves, as they we
       head: "0073ccd1d4100cbc8776d72bac181a5fed0012a6",
       locked: false,
       folder: "16777232:4242",
+      repository: "/Users/me/src/repo/.git",
     },
   ]);
   assert.deepEqual(

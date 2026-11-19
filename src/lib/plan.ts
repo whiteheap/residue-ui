@@ -33,6 +33,7 @@ export function planLists(plan: RemoveDocument) {
  */
 export function shownOf(plan: RemoveDocument, folders: Record<string, string>): ShownRemoval {
   return {
+    plan: plan.plan,
     as_of: plan.as_of,
     worktrees: planLists(plan).ready.map((r) => ({
       path: r.path,
@@ -41,6 +42,7 @@ export function shownOf(plan: RemoveDocument, folders: Record<string, string>): 
       head: r.worktree?.head ?? null,
       locked: r.worktree?.locked ?? false,
       folder: folders[r.path] ?? null,
+      repository: r.repository ?? null,
     })),
     purges: plan.purged.map((p) => p.entry),
     forgets: plan.forgotten.map((f) => f.entry),

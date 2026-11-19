@@ -10,13 +10,14 @@
 //! longer move, is dropped from the run, and a trash entry it may purge or a
 //! removal record it may forget that the dialog did not list stops the run.
 //! After the run, `unlisted` names what residue moved, purged or forgot that
-//! the dialog did not show, which only a change in the moment between that
-//! plan and the run's own can cause.
+//! the dialog did not show. The confirmed run passes the dialog's plan as
+//! `--expect`, so a change in the moment after this check and before residue
+//! moves anything exits 4 and moves nothing (`Confirm::Stale` in `lib.rs`).
 //!
 //! Every value compared is residue's, from its `residue.remove/v1` JSON, but
-//! the folder (`folder::id`), which the app reads right after each plan: the
-//! JSON names no repository, so another worktree at a path, on the same
-//! branch and HEAD, differs only by its folder.
+//! the folder (`folder::id`), which the app reads right after each plan.
+//! Each result also names its `repository`, so another repository's worktree
+//! at a path differs by that as well as by its folder.
 
 use crate::env::tilde;
 use crate::folder;
@@ -36,6 +37,10 @@ pub struct Worktree {
     /// `folder::id` of the worktree's folder right after that plan; `None`
     /// when it could not be read.
     pub folder: Option<String>,
+    /// The result's `repository`: its common Git directory, or `None` when
+    /// the plan named none.
+    #[serde(default)]
+    pub repository: Option<String>,
 }
 
 /// A trash entry a plan lists, by the fields residue reads from its `info`.
@@ -63,6 +68,11 @@ pub struct Record {
 /// What the removal dialog showed, which its confirm sends back.
 #[derive(Debug, Deserialize)]
 pub struct Shown {
+    /// The plan's `plan`: 32 lowercase hex digits. The confirmed run passes
+    /// it as `--expect`. `None` when the confirm sends none, which runs
+    /// nothing.
+    #[serde(default)]
+    pub plan: Option<String>,
     /// The plan's `as_of`: the time it judged every age at, its
     /// `generated_at` for a plan made without `--as-of`.
     pub as_of: Option<String>,
@@ -87,6 +97,10 @@ pub struct Plan {
 #[derive(Debug, Deserialize)]
 struct Row {
     path: String,
+    /// Its repository's common Git directory, or null when the path names no
+    /// worktree. Absent in a document from before residue 0.0.14.
+    #[serde(default)]
+    repository: Option<String>,
     result: String,
     reason: Option<String>,
     /// For a worktree it moved: the trash entry it moved it into.
@@ -202,6 +216,10 @@ pub fn check(
                     "{at}: residue would not move it now; {}",
                     row.why()
                 )),
+                Some(_) if row.repository != w.repository => {
+                    out.dropped
+                        .push(format!("{at}: another repository is at this path now"));
+                }
                 Some(report) => {
                     differ(&mut out.dropped, &at, w, report, folders.get(&w.path), home)
                 }
@@ -272,6 +290,11 @@ pub fn unlisted(shown: &Shown, ran: &Plan, home: &Path) -> Vec<String> {
             ));
             continue;
         };
+        if row.repository != w.repository {
+            out.push(format!(
+                "{at}: moved a worktree of another repository than the plan showed"
+            ));
+        }
         let moved = row.trash_entry.as_deref().and_then(|entry| {
             let name =
                 Path::new(report.canonical_path.as_deref().unwrap_or(&row.path)).file_name()?;
@@ -455,6 +478,7 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(plan).unwrap();
         let p = Plan::read(plan).unwrap();
         Shown {
+            plan: v["plan"].as_str().map(String::from),
             as_of: v["as_of"].as_str().map(String::from),
             worktrees: p
                 .results
@@ -469,6 +493,7 @@ mod tests {
                         head: w.head.clone(),
                         locked: w.locked,
                         folder: folders.get(&r.path).cloned(),
+                        repository: r.repository.clone(),
                     }
                 })
                 .collect(),
@@ -666,6 +691,40 @@ mod tests {
                 "~/src/wt2: another folder is at this path now",
                 "~/src/wt3: leads to ~/src/wt3 → ~/private/wtY",
             ]
+        );
+    }
+
+    #[test]
+    fn another_repository_at_a_listed_path_refuses_the_run() {
+        let mut shown = shown_of(&base(), &folders(&[(WT2, "1:2"), (WT3, "1:3")]));
+        for w in &mut shown.worktrees {
+            w.repository = Some(format!("{REPO}/.git"));
+        }
+        let mut other = row(
+            WT2,
+            "skipped",
+            report(WT2, "b-wt2", "7bcce62f00", "candidate"),
+        );
+        other["repository"] = json!("/Users/me/src/other/.git");
+        let mut same = row(
+            WT3,
+            "skipped",
+            report(WT3, "b-wt3", "7bcce62f00", "candidate"),
+        );
+        same["repository"] = json!(format!("{REPO}/.git"));
+        let fresh = doc(vec![other, same], vec![], vec![]);
+        let f = folders(&[(WT2, "1:2"), (WT3, "1:3")]);
+        let c = check(
+            &shown,
+            &[WT2.into(), WT3.into()],
+            &Plan::read(&fresh).unwrap(),
+            &f,
+            home(),
+        );
+        assert_eq!(c.keep, [WT3]);
+        assert_eq!(
+            c.dropped,
+            ["~/src/wt2: another repository is at this path now"]
         );
     }
 
